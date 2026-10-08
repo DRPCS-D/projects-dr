@@ -1,0 +1,9 @@
+{
+  "$comentario": "Identidad de la app. Cambiar esto (mas el 'name' de package.json) rebrandea la app entera: titulo, manifest de la PWA, cabecera, login e iconos.",
+  "nombre": "Proyectos DR",
+  "descripcion": "Gestión de proyectos: proyectos, equipos, tareas y tableros Kanban en un solo lugar.",
+  "colorPrimario": "#1659b5",
+  "colorFondo": "#eceff3",
+  "idioma": "es-PY",
+  "credito": ""
+}

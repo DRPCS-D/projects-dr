@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Nunca commitear claves
+.env
+.env.local
+.env.*.local
+.vercel
+
+# Permisos de Claude Code aprobados en esta maquina, no del proyecto
+.claude/settings.local.json
+
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# clasp: el scriptId es de cada instalacion
+apps-script/.clasp.json
+
+# Base local de desarrollo (npm run dev sin VITE_GAS_URL)
+.gas-local
