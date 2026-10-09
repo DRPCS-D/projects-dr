@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Cargando, ErrorBox, Vacio } from '@/components/ui/estado'
 import { Kpi } from '@/components/ui/tabla'
 import { invalidarResumenes, useMisTareas } from '@/hooks/useProyectos'
-import { gas, mensajeDe } from '@/lib/api'
+import { editarTarea } from '@/lib/datos'
+import { mensajeDe } from '@/lib/errores'
 import { descargarCSV } from '@/lib/exportar'
 import { agruparMisTareas, GRUPOS_MIS_TAREAS, type GrupoMisTareas } from '@/lib/tareas'
 import { PRIORIDAD_LABEL, type Tarea, type TareaMia } from '@/lib/tipos'
@@ -27,7 +28,7 @@ export default function MisTareas() {
     const aplicar = (cambios: Partial<Tarea>) => mutar((d) => d.map((x) => (x.id === t.id ? { ...x, ...cambios } : x)))
     aplicar({ completada, completada_en: completada ? new Date().toISOString() : null })
     try {
-      const real = await gas<Tarea>('tareas.editar', { id: t.id, completada })
+      const real = await editarTarea(t.id, { completada })
       aplicar(real)
       invalidarResumenes()
     } catch (e) {

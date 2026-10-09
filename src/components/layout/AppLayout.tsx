@@ -11,27 +11,59 @@ import { useAuth } from '@/hooks/useAuth'
 import { APP_NOMBRE } from '@/lib/app'
 import { cn } from '@/lib/utils'
 
-// Un solo nivel de usuario: todos ven el mismo menu.
-const NAV = [
+const NAV_BASE = [
   { to: '/', label: 'Inicio', end: true, icono: House },
   { to: '/proyectos', label: 'Proyectos', end: false, icono: FolderKanban },
   { to: '/mis-tareas', label: 'Mis tareas', end: false, icono: CheckSquare },
-  { to: '/usuarios', label: 'Usuarios', end: false, icono: Users },
 ]
+// Gestionar usuarios es cosa de los admin: un usuario comun ni ve el link (y la
+// Edge Function tampoco le haria caso: el menu solo evita mostrar algo que va a fallar).
+const NAV_USUARIOS = { to: '/usuarios', label: 'Usuarios', end: false, icono: Users }
+
+const MENSAJE_PROBLEMA = {
+  inactivo: {
+    titulo: 'Cuenta desactivada',
+    texto: 'Tu usuario fue desactivado. Contactá a un administrador.',
+  },
+  'sin-perfil': {
+    titulo: 'Cuenta sin configurar',
+    texto: 'Tu usuario existe pero todavía no está dado de alta en el sistema. Contactá a un administrador.',
+  },
+} as const
 
 export default function AppLayout() {
-  const { usuario, loading, errorConexion, signOut, reintentar } = useAuth()
+  const { session, usuario, esAdmin, loading, problemaPerfil, errorConexion, signOut, reintentar } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [modalPassword, setModalPassword] = useState(false)
 
   useEffect(() => {
-    // Un fallo de conexion no es "sin sesion": no se manda al login.
-    if (!loading && !usuario && !errorConexion) navigate('/login', { replace: true })
-  }, [usuario, loading, errorConexion, navigate])
+    if (!loading && !session) navigate('/login', { replace: true })
+  }, [session, loading, navigate])
+
+  const NAV = esAdmin ? [...NAV_BASE, NAV_USUARIOS] : NAV_BASE
 
   if (loading) return <Cargando className="min-h-screen" texto="Cargando tu cuenta…" />
-  if (!usuario && errorConexion) {
+  if (!session) return null
+
+  // Sesion valida pero algo impide usar la app: sin esto la pantalla queda en
+  // blanco y no hay forma de entender por que.
+  if (problemaPerfil) {
+    const { titulo, texto } = MENSAJE_PROBLEMA[problemaPerfil]
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="max-w-md rounded-lg border border-border bg-card p-6 text-center shadow-xs">
+          <h1 className="text-sm font-semibold text-foreground">{titulo}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{texto}</p>
+          <Button variant="outline" className="mt-5" onClick={signOut}>
+            <LogOut /> Cerrar sesión
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (errorConexion) {
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="max-w-md rounded-lg border border-border bg-card p-6 text-center shadow-xs">

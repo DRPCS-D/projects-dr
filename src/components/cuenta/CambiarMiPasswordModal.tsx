@@ -4,14 +4,16 @@ import { Button } from '@/components/ui/button'
 import { ErrorBox } from '@/components/ui/estado'
 import { Field, Input } from '@/components/ui/field'
 import { Modal } from '@/components/ui/modal'
-import { gas, mensajeDe } from '@/lib/api'
+import { useAuth } from '@/hooks/useAuth'
+import { mensajeDe } from '@/lib/errores'
+import { supabase } from '@/lib/supabase'
 
 /**
  * Cambiar la propia contraseña. Pide la actual: si alguien deja la sesion
  * abierta en una compu ajena, no basta con eso para quedarse con la cuenta.
- * El servidor cierra las OTRAS sesiones abiertas; esta sigue valiendo.
  */
 export function CambiarMiPasswordModal({ abierto, onCerrar }: { abierto: boolean; onCerrar: () => void }) {
+  const { usuario } = useAuth()
   const [actual, setActual] = useState('')
   const [password, setPassword] = useState('')
   const [confirmacion, setConfirmacion] = useState('')
@@ -35,8 +37,19 @@ export function CambiarMiPasswordModal({ abierto, onCerrar }: { abierto: boolean
     setGuardando(true)
     setError(null)
     try {
-      await gas('auth.cambiarPassword', { actual, nueva: password })
-      toast.success('Contraseña actualizada', { description: 'Se cerraron tus otras sesiones abiertas.' })
+      // Se verifica la actual: si alguien deja la sesion abierta en una compu
+      // ajena, no alcanza con eso para quedarse con la cuenta.
+      const { error: errActual } = await supabase.auth.signInWithPassword({
+        email: usuario?.email ?? '',
+        password: actual,
+      })
+      if (errActual) {
+        setError('La contraseña actual no es correcta.')
+        return
+      }
+      const { error: errNueva } = await supabase.auth.updateUser({ password })
+      if (errNueva) throw errNueva
+      toast.success('Contraseña actualizada')
       onCerrar()
     } catch (e) {
       setError(mensajeDe(e, 'No se pudo cambiar la contraseña.'))

@@ -5,14 +5,16 @@ herramientas adentro), con funciones de **Asana / Trello**: tablero Kanban con
 arrastrar y soltar, vista lista, "Mis tareas", subtareas, etiquetas,
 prioridades y fechas.
 
-Los datos viven en **tu Google Sheet** y los archivos (próxima fase) en **tu
-Google Drive**, con **Google Apps Script** como backend. El frontend sale de
-`app-base` (React + Vite + Tailwind, tema claro/oscuro, PWA instalable).
-
 **Stack:** React 19 + TypeScript + Vite · Tailwind v4 · React Router · @dnd-kit ·
-Google Apps Script (Sheets + Drive) · hosting estático (Vercel).
+**Supabase** (Postgres + Auth + Edge Functions) · hosting estático (Vercel).
+Sale de `app-base`: misma estructura, componentes, tema claro/oscuro y PWA.
 
-## Qué hay en esta versión (MVP)
+> La primera versión usaba Google Apps Script + Google Sheets. Se reemplazó por
+> Supabase por velocidad (1–3 s por acción y picos de 30 s) y porque un candado
+> de escritura trabado dejaba la app sin poder guardar. Esa versión sigue en
+> git: `git checkout backend-apps-script`.
+
+## Qué incluye (MVP)
 
 | Módulo | Qué hace |
 | --- | --- |
@@ -22,129 +24,111 @@ Google Apps Script (Sheets + Drive) · hosting estático (Vercel).
 | Proyecto → Lista | Las mismas secciones como listas plegables (to-do lists de Basecamp). |
 | Tarea (panel lateral) | Responsable, inicio, vencimiento, prioridad, sección, etiquetas, descripción, subtareas. Se guarda solo. Link compartible (`?tarea=…`). |
 | Mis tareas | Todo lo asignado a vos en todos tus proyectos: vencidas, hoy, próximos 7 días, más adelante. |
-| Usuarios | Alta, edición, desactivar, resetear contraseña. Un solo nivel de usuario. |
+| Usuarios (solo admin) | Alta, edición, rol, activar/desactivar, resetear contraseña. |
 | Exportar | CSV de un proyecto o de "Mis tareas" (abre bien en Excel en español). |
 
-**Permisos:** hay un solo nivel de usuario. Cada proyecto lo ven **solo sus
-miembros**; quien lo crea queda adentro y puede sumar o sacar gente. Eso lo
-garantiza el backend (no la interfaz): un no-miembro recibe "no encontrado"
-aunque llame a la API directo con el id correcto.
+## Roles y permisos
+
+| Rol | Puede |
+| --- | --- |
+| `admin` | Gestionar usuarios (crear, editar, cambiar rol, desactivar, resetear clave). **No** ve proyectos ajenos por ser admin. |
+| `usuario` | Crear proyectos y trabajar en aquellos donde es miembro. |
+
+**Cada proyecto lo ven solo sus miembros**, sea cual sea su rol. Quien lo crea
+queda adentro y puede sumar o sacar gente. Eso lo garantiza **Row Level
+Security en Postgres**, no la interfaz: aunque alguien llame a la API directo
+con el id de un proyecto ajeno, la base no le devuelve nada.
+
+Un usuario desactivado pierde el acceso en el acto (la RLS lo exige activo),
+aunque su sesión siga abierta.
 
 ## Cómo está armado
 
 ```
-Navegador (React)  ──POST text/plain {accion, token, datos}──▶  Apps Script Web App
-                                                                  │  Router → valida token → handler
-                                                                  │  LockService en cada escritura
-                                                                  ▼
-                                                 Google Sheet: una hoja por tabla
-                                                 Usuarios · Sesiones · Proyectos · Miembros
-                                                 Secciones · Tareas · Etiquetas · Actividad
+Navegador (React) ──supabase-js──▶ Postgres (RLS)        lecturas y escrituras, protegidas por política
+                  └─invoke──────▶ Edge Function admin-usuarios   alta/edición de usuarios (clave privada)
 ```
 
-- `apps-script/` — el backend (se sube con `clasp`). `Db.js` es la única capa
-  que toca el Sheet; `Router.js` lista todas las acciones.
-- `src/` — el frontend. `lib/api.ts` (`gas()`) es el único punto que habla con
-  el backend.
-- `scripts/gas-local.mjs` — corre el backend en Node con un Sheet en memoria:
-  lo usan los tests y `npm run dev` (ver abajo).
+- `supabase/migrations/` — esquema y seguridad. `001_schema.sql` (tablas) y
+  `002_seguridad.sql` (RLS, triggers de integridad, funciones).
+- `supabase/functions/admin-usuarios/` — lo único que necesita la clave
+  privada (`service_role`): crear cuentas, cambiar email/contraseña, desactivar.
+  Solo responde a un admin; la verifica contra la base en cada pedido.
+- `supabase/tests/rls_test.sql` — 54 comprobaciones de seguridad contra
+  Postgres de verdad (ver "Pruebas").
+- `src/lib/datos.ts` — **único** lugar donde la app habla con la base.
 
-## Desarrollo local (sin desplegar nada)
+### Operaciones que son funciones SQL (no escrituras sueltas)
+`crear_proyecto`, `guardar_miembros`, `salir_proyecto`, `eliminar_seccion` y
+`listar_proyectos`: tocan varias tablas a la vez y tienen que ser "todo o nada".
 
+## Puesta en marcha
+
+### 1. Supabase (una sola vez)
+El proyecto es `projects-dr` (región São Paulo). Las migraciones y la Edge
+Function ya están aplicadas. Si hubiera que rehacerlo en otro proyecto: correr
+`001_schema.sql` y `002_seguridad.sql` en el SQL Editor y desplegar
+`supabase/functions/admin-usuarios` con **verify_jwt desactivado** (la función
+valida el token por su cuenta).
+
+**Primer administrador** — nadie puede darse de alta solo, así que el primero
+se crea a mano:
+1. Supabase → **Authentication → Users → Add user → Create new user**, con tu
+   email y una contraseña, marcando **Auto Confirm User**.
+2. Correr `supabase/primer_admin.sql` (cambiando el email) en el **SQL Editor**.
+3. **Authentication → Sign In / Providers → desactivá "Allow new users to sign up"**.
+   (Aunque alguien se registrara, sin fila en `usuarios` no accede a nada, pero
+   no tiene por qué poder crear cuentas.)
+
+### 2. Frontend
 ```bash
+cp .env.example .env     # VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY (Project Settings → API)
 npm install
 npm run dev
 ```
+La clave `publishable`/`anon` es **pública por diseño**: lo que protege los
+datos es la RLS. **Nunca** poner la `service_role` en una variable `VITE_*`.
 
-Sin `VITE_GAS_URL` en `.env`, `npm run dev` levanta el **mismo código de
-`apps-script/`** en `/gas-local`, sobre un Sheet en memoria guardado en
-`.gas-local/db.json`. La primera vez crea el usuario de prueba definido en
-`SEMBRADO_LOCAL` (`vite.config.ts`). Para empezar de cero, borrar
-`.gas-local/`. Para simular la latencia real de Apps Script:
-`GAS_LOCAL_DEMORA=900 npm run dev`.
+### 3. Vercel
+Importar el repo y cargar en **Settings → Environment Variables**:
+`VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`. `vercel.json` ya reescribe las
+rutas a `index.html`. Si se agregan o cambian después del primer deploy hay
+que hacer **Redeploy** (las variables `VITE_*` quedan dentro del build).
 
-```bash
-npm test          # vitest: backend de Apps Script (aislamiento, auth...) + lógica del cliente
-npm run lint      # oxlint
-npm run build     # tsc + vite build
-```
-
-## Puesta en producción (una sola vez)
-
-### 1. Backend en Apps Script
-
-**Sin instalar nada (copiar y pegar):** en el editor web de Apps Script dejá
-solo `appsscript.json` (con el contenido de `apps-script/appsscript.json`) y
-**un único** archivo `Codigo` con todo el contenido de
-`apps-script-un-archivo/Codigo.js`. Ese archivo se genera con
-`npm run gas:bundle` a partir de `apps-script/`. Después seguí desde "En el
-editor de Apps Script" más abajo.
-
-**Con clasp (recomendado si vas a hacer cambios seguido):**
+## Pruebas
 
 ```bash
-npm i -g @google/clasp
-clasp login                          # con tu cuenta de Google
-cd apps-script
-clasp create --type standalone --title "Proyectos DR"   # crea .clasp.json
-clasp push
+npm test         # vitest: lógica del cliente (orden, fechas, agrupaciones, recursos)
+npm run lint     # oxlint
+npm run build    # tsc + vite build
 ```
 
-En el editor de Apps Script (`clasp open`):
+**Seguridad (RLS):** pegar `supabase/tests/rls_test.sql` entero en el SQL
+Editor. Simula a un admin, usuarios comunes, un desactivado y a alguien sin
+sesión, y comprueba que nadie ve ni toca lo que no debe. **Termina siempre con
+un "error" `REPORTE …`**: es a propósito, descarta la transacción (no deja datos
+de prueba) y el reporte viaja en el mensaje. Cada línea es `ok` o `FALLA`.
+Correrlo después de cada cambio en políticas o funciones.
 
-1. Elegir la función **`setup`** → **Ejecutar**. Pide permisos (Sheets y
-   Drive) la primera vez. Crea el Sheet **"Proyectos DR — Base de datos"**
-   dentro de una carpeta **"Proyectos DR"** en tu Drive, y el primer usuario
-   con **tu email**. La contraseña aparece en el **Registro de ejecución**:
-   cambiala al entrar (ícono de llave).
-2. **Implementar → Nueva implementación → Aplicación web**:
-   - Ejecutar como: **Yo**
-   - Quién tiene acceso: **Cualquier usuario**
-3. Copiar la URL (termina en `/exec`).
+## Notas de operación
 
-"Cualquier usuario" significa que la URL responde a cualquiera, no que los
-datos sean públicos: todas las acciones salvo el login exigen un token de
-sesión válido, y cada proyecto solo se muestra a sus miembros.
-
-> Al cambiar el código del backend: `npm run gas:push` y después
-> **Implementar → Administrar implementaciones → editar → Nueva versión**
-> (la URL se mantiene).
-
-### 2. Frontend
-
-```bash
-cp .env.example .env     # y pegar la URL en VITE_GAS_URL
-npm run build
-```
-
-En Vercel: importar el repo y cargar `VITE_GAS_URL` en **Settings →
-Environment Variables**. `vercel.json` ya reescribe las rutas a `index.html`.
-
-## Editar el Sheet a mano
-
-Se puede (es tu base): las celdas están en formato texto para que Sheets no
-convierta fechas por su cuenta. Se pueden reordenar columnas o agregar
-columnas propias (p. ej. "notas"): el backend las respeta. Lo que **no** hay
-que hacer es renombrar los encabezados existentes. Volver a correr `setup()`
-agrega hojas o columnas faltantes sin borrar nada.
-
-## Límites a tener en cuenta
-
-- Cada llamada a Apps Script tarda ~0,5–2 s. La interfaz es **optimista**
-  (los cambios se ven al instante y se guardan por detrás; si falla, avisa y
-  recarga), y abrir un proyecto trae todo en una sola llamada.
-- Pensado para equipos chicos/medianos (decenas de usuarios, decenas de miles
-  de tareas). Si crece más, se reemplaza `apps-script/Db.js` por otra base
-  sin tocar el frontend.
+- **Plan gratis de Supabase:** un proyecto sin actividad por 7 días se **pausa**
+  (se reactiva con un clic en el panel; los datos no se pierden).
+- **Backups:** el plan gratis no incluye backups descargables automáticos;
+  `Database → Backups` según el plan. Para exportar, `Table Editor → Export`.
+- **Cambiar una política o función:** crear una migración nueva
+  (`003_…sql`), no editar las ya aplicadas.
 
 ## Próximas fases sugeridas
 
 1. **Comunicación:** comentarios en tareas con @menciones, tablero de mensajes
-   del proyecto, feed de actividad (la hoja `Actividad` ya se está llenando).
-2. **Archivos:** carpeta de Drive por proyecto, adjuntos en tareas, docs.
+   del proyecto, feed de actividad (la tabla `actividad` ya se llena sola).
+2. **Archivos:** carpeta de Google Drive por proyecto y adjuntos en tareas
+   (`proyectos.drive_folder_id` ya existe).
 3. **Agenda:** calendario e hitos, vista timeline (Gantt simple),
-   notificaciones y resumen diario por email (MailApp + trigger),
-   plantillas de proyecto, check-ins automáticos.
+   notificaciones y resumen diario por email, plantillas de proyecto.
+4. **Tiempo real:** que los cambios de otros aparezcan sin recargar (Supabase
+   Realtime).
 
 ## PWA, tema y versionado
 

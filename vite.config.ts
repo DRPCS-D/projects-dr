@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -100,69 +100,9 @@ function marcaApp(): Plugin {
   }
 }
 
-/**
- * Backend local para desarrollar sin desplegar Apps Script: si `.env` no
- * tiene `VITE_GAS_URL`, el cliente le habla a `/gas-local`, y este plugin
- * corre ahi el MISMO codigo de `apps-script/` sobre un Sheet en memoria
- * (scripts/gas-local.mjs), guardado en `.gas-local/db.json` tras cada
- * escritura. La primera vez siembra el usuario de `SEMBRADO_LOCAL`.
- *
- * Solo existe en `npm run dev`: el build de produccion no lo incluye.
- */
-const SEMBRADO_LOCAL = { email: 'admin@proyectos.test', password: 'admin1234', nombre: 'Admin Local' }
-
-function gasLocal(): Plugin {
-  const archivo = path.resolve(raiz, '.gas-local/db.json')
-  return {
-    name: 'gas-local',
-    apply: 'serve',
-    async configureServer(server) {
-      const { crearGasLocal } = await import('./scripts/gas-local.mjs')
-      const estado = existsSync(archivo) ? JSON.parse(readFileSync(archivo, 'utf-8')) : {}
-      const gas = crearGasLocal(estado, { email: SEMBRADO_LOCAL.email })
-      if (!estado.hojas) {
-        gas.setProp('SETUP_EMAIL', SEMBRADO_LOCAL.email)
-        gas.setProp('SETUP_PASSWORD', SEMBRADO_LOCAL.password)
-        gas.setProp('SETUP_NOMBRE', SEMBRADO_LOCAL.nombre)
-        gas.setup()
-      }
-      const guardar = () => {
-        mkdirSync(path.dirname(archivo), { recursive: true })
-        writeFileSync(archivo, JSON.stringify(gas.exportar()))
-      }
-      guardar()
-      // Demora artificial (ms) para ver la app como con Apps Script de verdad: GAS_LOCAL_DEMORA=800 npm run dev
-      const demora = Number(process.env.GAS_LOCAL_DEMORA ?? 150)
-
-      server.middlewares.use('/gas-local', (req, res) => {
-        let cuerpo = ''
-        req.on('data', (c) => (cuerpo += c))
-        req.on('end', () => {
-          let respuesta: unknown
-          try {
-            respuesta = gas.manejar(JSON.parse(cuerpo || '{}'))
-            guardar()
-          } catch {
-            respuesta = { ok: false, error: 'JSON inválido.', codigo: 400 }
-          }
-          setTimeout(() => {
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify(respuesta))
-          }, demora)
-        })
-      })
-    },
-  }
-}
-
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => ({
-  plugins: [
-    react(),
-    tailwindcss(),
-    marcaApp(),
-    ...(loadEnv(mode, raiz, 'VITE_').VITE_GAS_URL ? [] : [gasLocal()]),
-  ],
+export default defineConfig({
+  plugins: [react(), tailwindcss(), marcaApp()],
   resolve: {
     alias: {
       '@': path.resolve(raiz, './src'),
@@ -178,4 +118,4 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: 'dist',
   },
-}))
+})

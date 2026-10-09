@@ -1,19 +1,17 @@
-import { gas } from '@/lib/api'
+import { crearProyecto, listarProyectos, misTareas } from '@/lib/datos'
 import { crearRecurso } from '@/lib/recurso'
+import { supabase } from '@/lib/supabase'
 import { hoyISO } from '@/lib/tareas'
-import type { Proyecto, ProyectoConResumen, TareaMia } from '@/lib/tipos'
+import type { Proyecto, TareaMia } from '@/lib/tipos'
 
 /** Proyectos de los que soy miembro, con su resumen de tareas. */
-const proyectos = crearRecurso(
-  () => gas<ProyectoConResumen[]>('proyectos.listar', { hoy: hoyISO() }),
-  'No se pudieron cargar los proyectos.',
-)
+const proyectos = crearRecurso(() => listarProyectos(hoyISO()), 'No se pudieron cargar los proyectos.')
 
 /** "Mis tareas": lo asignado a mi en todos mis proyectos activos (+ completadas recientes). */
-const mias = crearRecurso(
-  () => gas<TareaMia[]>('tareas.mias', { incluirCompletadas: true }),
-  'No se pudieron cargar tus tareas.',
-)
+const mias = crearRecurso(async () => {
+  const { data } = await supabase.auth.getSession()
+  return misTareas(data.session?.user.id ?? '')
+}, 'No se pudieron cargar tus tareas.')
 
 /** Llamar despues de tocar tareas: la lista de proyectos y "Mis tareas" se revalidan al volver a verse. */
 export function invalidarResumenes() {
@@ -25,7 +23,7 @@ export function useProyectos() {
   const estado = proyectos.useRecurso()
 
   async function crear(datos: { nombre: string; descripcion: string; color: string; miembros: string[] }) {
-    const p = await gas<ProyectoConResumen>('proyectos.crear', datos)
+    const p = await crearProyecto(datos)
     proyectos.mutar((d) => [p, ...d])
     return p
   }
@@ -47,3 +45,5 @@ export function quitarDeLista(id: string) {
 export function useMisTareas() {
   return { ...mias.useRecurso(), mutar: mias.mutar }
 }
+
+export type { TareaMia }

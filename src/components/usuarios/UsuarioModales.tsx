@@ -5,12 +5,12 @@ import { Avatar, SelectorColor } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ErrorBox } from '@/components/ui/estado'
-import { Field, Input } from '@/components/ui/field'
+import { Field, Input, Select } from '@/components/ui/field'
 import { Modal } from '@/components/ui/modal'
 import { useUsuarios } from '@/hooks/useUsuarios'
-import { mensajeDe } from '@/lib/api'
+import { mensajeDe } from '@/lib/errores'
 import { formatFecha } from '@/lib/format'
-import { COLORES, type Usuario } from '@/lib/tipos'
+import { COLORES, ROL_LABEL, type Rol, type Usuario } from '@/lib/tipos'
 
 /**
  * Modales de gestion de usuarios. Un solo nivel de usuario: cualquiera da de
@@ -19,6 +19,27 @@ import { COLORES, type Usuario } from '@/lib/tipos'
  */
 
 type Acciones = ReturnType<typeof useUsuarios>
+
+function SelectorRol({
+  valor,
+  onCambiar,
+  disabled,
+  hint,
+}: {
+  valor: Rol
+  onCambiar: (r: Rol) => void
+  disabled?: boolean
+  hint?: string
+}) {
+  return (
+    <Field label="Rol" hint={hint ?? 'Los administradores gestionan usuarios. Ver proyectos depende de ser miembro, no del rol.'}>
+      <Select value={valor} onChange={(e) => onCambiar(e.target.value as Rol)} disabled={disabled}>
+        <option value="usuario">{ROL_LABEL.usuario}</option>
+        <option value="admin">{ROL_LABEL.admin}</option>
+      </Select>
+    </Field>
+  )
+}
 
 export function NuevoUsuarioModal({
   abierto,
@@ -32,6 +53,7 @@ export function NuevoUsuarioModal({
   const [nombre, setNombre] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rol, setRol] = useState<Rol>('usuario')
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
 
@@ -40,6 +62,7 @@ export function NuevoUsuarioModal({
       setNombre('')
       setEmail('')
       setPassword('')
+      setRol('usuario')
       setError(null)
     }
   }, [abierto])
@@ -50,7 +73,7 @@ export function NuevoUsuarioModal({
     setGuardando(true)
     setError(null)
     try {
-      await crear({ nombre: nombre.trim(), email: email.trim(), password })
+      await crear({ nombre: nombre.trim(), email: email.trim(), password, rol })
       toast.success('Usuario creado', { description: 'Pasale su email y contraseña para que entre.' })
       onCerrar()
     } catch (e) {
@@ -94,6 +117,7 @@ export function NuevoUsuarioModal({
         <Field label="Contraseña inicial" hint="Mínimo 8 caracteres.">
           <Input type="text" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" />
         </Field>
+        <SelectorRol valor={rol} onCambiar={setRol} />
         {error && <ErrorBox mensaje={error} />}
         <button type="submit" hidden />
       </form>
@@ -143,7 +167,9 @@ export function UsuarioDetalleModal({
         </div>
         <Badge tono={usuario.activo ? 'success' : 'neutral'}>{usuario.activo ? 'Activo' : 'Inactivo'}</Badge>
       </div>
-      <p className="mt-3 text-xs text-muted-foreground">Alta: {formatFecha(usuario.creado_en)}</p>
+      <p className="mt-3 text-xs text-muted-foreground">
+        {ROL_LABEL[usuario.rol]} · Alta: {formatFecha(usuario.creado_en)}
+      </p>
 
       <div className="mt-5 grid gap-2">
         <Button variant="outline" onClick={onEditar}>
@@ -165,11 +191,13 @@ export function UsuarioDetalleModal({
 
 export function EditarUsuarioModal({
   usuario,
+  esYo,
   onCerrar,
   editar,
   onGuardado,
 }: {
   usuario: Usuario | null
+  esYo: boolean
   onCerrar: () => void
   editar: Acciones['editar']
   onGuardado?: (u: Usuario) => void
@@ -177,6 +205,7 @@ export function EditarUsuarioModal({
   const [nombre, setNombre] = useState('')
   const [email, setEmail] = useState('')
   const [color, setColor] = useState(COLORES[0])
+  const [rol, setRol] = useState<Rol>('usuario')
   const [error, setError] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
 
@@ -184,6 +213,7 @@ export function EditarUsuarioModal({
     if (usuario) {
       setNombre(usuario.nombre)
       setEmail(usuario.email)
+      setRol(usuario.rol)
       setColor(usuario.color || COLORES[0])
       setError(null)
     }
@@ -194,7 +224,7 @@ export function EditarUsuarioModal({
     setGuardando(true)
     setError(null)
     try {
-      const u = await editar({ id: usuario.id, nombre, email, color })
+      const u = await editar({ id: usuario.id, nombre, email, color, rol })
       onGuardado?.(u)
       toast.success('Datos actualizados')
       onCerrar()
@@ -229,6 +259,12 @@ export function EditarUsuarioModal({
         <Field label="Email" hint="Es con el que inicia sesión.">
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
         </Field>
+        <SelectorRol
+          valor={rol}
+          onCambiar={setRol}
+          disabled={esYo}
+          hint={esYo ? 'No podés cambiar tu propio rol: pedíselo a otro administrador.' : undefined}
+        />
         <Field label="Color del avatar">
           <SelectorColor colores={COLORES} valor={color} onCambiar={setColor} />
         </Field>

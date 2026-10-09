@@ -1,5 +1,0 @@
-# clasp sube solo el codigo del backend: los tests corren en Node, no en Apps Script.
-tests/**
-**/*.mjs
-**/*.md
-.clasp.json

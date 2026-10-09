@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import { invalidarResumenes } from '@/hooks/useProyectos'
-import { gas, mensajeDe } from '@/lib/api'
+import * as datosApi from '@/lib/datos'
+import { mensajeDe } from '@/lib/errores'
 import { alResetearRecursos } from '@/lib/recurso'
 import { ordenEntre, tareasDeSeccion } from '@/lib/tareas'
-import type { CambiosTarea, DatosProyecto, Etiqueta, Proyecto, Seccion, Tarea } from '@/lib/tipos'
+import type { CambiosTarea, DatosProyecto, Proyecto, Tarea } from '@/lib/tipos'
 
 /**
  * Todo lo de UN proyecto (secciones, tareas, etiquetas, miembros), cacheado
@@ -60,7 +61,7 @@ function cargar(id: string): Promise<void> {
   if (!get(id).cargadoEn) set(id, { loading: true, error: null })
   const p = (async () => {
     try {
-      const datos = await gas<DatosProyecto>('proyectos.cargar', { id })
+      const datos: DatosProyecto = await datosApi.cargarProyecto(id)
       if (gen !== generacion) return
       set(id, { datos, loading: false, error: null, cargadoEn: Date.now() })
     } catch (e) {
@@ -146,7 +147,7 @@ export function useProyecto(id: string) {
       }
       mutarDatos(id, (x) => ({ ...x, tareas: [...x.tareas, temporal] }))
       const real = await escribir(
-        () => gas<Tarea>('tareas.crear', { ...resto, orden, proyecto_id: id }),
+        () => datosApi.crearTarea({ ...resto, orden, proyecto_id: id }),
         'No se pudo crear la tarea.',
       )
       mutarDatos(id, (x) => ({
@@ -180,7 +181,7 @@ export function useProyecto(id: string) {
         }),
       }))
       const real = await escribir(
-        () => gas<Tarea>('tareas.editar', { id: tareaId, ...cambios }),
+        () => datosApi.editarTarea(tareaId, cambios),
         'No se pudo guardar la tarea.',
       )
       if (real) mutarDatos(id, (x) => ({ ...x, tareas: x.tareas.map((t) => (t.id === real.id ? real : t)) }))
@@ -191,7 +192,7 @@ export function useProyecto(id: string) {
   const eliminarTarea = useCallback(
     async (tareaId: string) => {
       mutarDatos(id, (x) => ({ ...x, tareas: x.tareas.filter((t) => t.id !== tareaId && t.parent_id !== tareaId) }))
-      await escribir(() => gas('tareas.eliminar', { id: tareaId }), 'No se pudo eliminar la tarea.')
+      await escribir(() => datosApi.eliminarTarea(tareaId), 'No se pudo eliminar la tarea.')
     },
     [id, escribir],
   )
@@ -200,7 +201,9 @@ export function useProyecto(id: string) {
 
   const crearSeccion = useCallback(
     async (nombre: string) => {
-      const s = await escribir(() => gas<Seccion>('secciones.crear', { proyecto_id: id, nombre }), 'No se pudo crear la sección.')
+      // Va al final: un orden mayor que el de todas las demas.
+      const orden = (get(id).datos?.secciones ?? []).reduce((max, x) => Math.max(max, x.orden), 0) + 1
+      const s = await escribir(() => datosApi.crearSeccion(id, nombre, orden), 'No se pudo crear la sección.')
       if (s) mutarDatos(id, (x) => ({ ...x, secciones: [...x.secciones, s] }))
       return s
     },
@@ -210,7 +213,7 @@ export function useProyecto(id: string) {
   const editarSeccion = useCallback(
     async (seccionId: string, cambios: { nombre?: string; orden?: number }) => {
       mutarDatos(id, (x) => ({ ...x, secciones: x.secciones.map((s) => (s.id === seccionId ? { ...s, ...cambios } : s)) }))
-      await escribir(() => gas('secciones.editar', { id: seccionId, ...cambios }), 'No se pudo guardar la sección.')
+      await escribir(() => datosApi.editarSeccion(seccionId, cambios), 'No se pudo guardar la sección.')
     },
     [id, escribir],
   )
@@ -218,7 +221,7 @@ export function useProyecto(id: string) {
   const eliminarSeccion = useCallback(
     async (seccionId: string, moverA?: string) => {
       const ok = await escribir(
-        () => gas('secciones.eliminar', { id: seccionId, mover_a: moverA }),
+        () => datosApi.eliminarSeccion(seccionId, moverA),
         'No se pudo eliminar la sección.',
       )
       // Mover las tareas cambia sus ordenes: mas simple traer el proyecto de nuevo.
@@ -232,7 +235,7 @@ export function useProyecto(id: string) {
   const crearEtiqueta = useCallback(
     async (nombre: string, color: string) => {
       const e = await escribir(
-        () => gas<Etiqueta>('etiquetas.crear', { proyecto_id: id, nombre, color }),
+        () => datosApi.crearEtiqueta(id, nombre, color),
         'No se pudo crear la etiqueta.',
       )
       if (e) mutarDatos(id, (x) => ({ ...x, etiquetas: [...x.etiquetas, e] }))
@@ -250,14 +253,14 @@ export function useProyecto(id: string) {
           t.etiquetas.includes(etiquetaId) ? { ...t, etiquetas: t.etiquetas.filter((e) => e !== etiquetaId) } : t,
         ),
       }))
-      await escribir(() => gas('etiquetas.eliminar', { id: etiquetaId }), 'No se pudo eliminar la etiqueta.')
+      await escribir(() => datosApi.eliminarEtiqueta(etiquetaId), 'No se pudo eliminar la etiqueta.')
     },
     [id, escribir],
   )
 
   // ── Proyecto ────────────────────────────────────────────────────────────
 
-  /** Para editar/archivar/miembros: el componente llama a gas() y refleja el resultado aca. */
+  /** Para editar/archivar/miembros: el componente llama a la base y refleja el resultado aca. */
   const reflejarProyecto = useCallback(
     (cambios: Partial<Proyecto>) => mutarDatos(id, (x) => ({ ...x, proyecto: { ...x.proyecto, ...cambios } })),
     [id],

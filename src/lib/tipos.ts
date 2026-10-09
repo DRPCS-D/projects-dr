@@ -1,15 +1,24 @@
 /**
- * Tipos de las entidades tal como las devuelve el backend (apps-script/).
+ * Tipos de las entidades tal como las devuelve la base (Supabase).
  *
- * Escritos a mano, espejo de `ESQUEMA` en `apps-script/Db.js`: si se agrega o
+ * Escritos a mano, espejo de supabase/migrations/001_schema.sql: si se agrega o
  * renombra una columna alla, hay que reflejarlo aca. Los campos opcionales
- * de la hoja (tipo `s?`) llegan como `null`, nunca como ''.
+ * (nullable) llegan como `null`.
  */
+
+export type Rol = 'admin' | 'usuario'
+
+export const ROL_LABEL: Record<Rol, string> = {
+  admin: 'Administrador',
+  usuario: 'Usuario',
+}
 
 export interface Usuario {
   id: string
   nombre: string
   email: string
+  /** admin: gestiona usuarios. No da acceso a proyectos ajenos (eso lo da ser miembro). */
+  rol: Rol
   activo: boolean
   color: string
   creado_en: string

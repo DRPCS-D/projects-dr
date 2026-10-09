@@ -120,3 +120,21 @@ export function crearRecurso<T>(cargar: () => Promise<T[]>, mensajeError: string
 
   return { useRecurso, useVersion, refetch, invalidar, mutar, get: () => estado.data }
 }
+
+/**
+ * PostgREST devuelve como maximo 1000 filas por consulta: esto pide de a
+ * paginas hasta traer todo. `consulta` recibe el rango (inclusive).
+ */
+export async function traerTodo<T>(
+  consulta: (desde: number, hasta: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<T[]> {
+  const PAGINA = 1000
+  const todo: T[] = []
+  for (let desde = 0; ; desde += PAGINA) {
+    const { data, error } = await consulta(desde, desde + PAGINA - 1)
+    if (error) throw error
+    todo.push(...(data ?? []))
+    if (!data || data.length < PAGINA) break
+  }
+  return todo
+}

@@ -7,10 +7,10 @@ import { Field, Input } from '@/components/ui/field'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { useAuth } from '@/hooks/useAuth'
 import { APP_CREDITO, APP_NOMBRE, APP_VERSION } from '@/lib/app'
-import { backendConfigurado } from '@/lib/api'
+import { backendConfigurado } from '@/lib/supabase'
 
 export default function Login() {
-  const { usuario, loading, signIn } = useAuth()
+  const { session, loading, signIn } = useAuth()
   const navigate = useNavigate()
 
   const [email, setEmail] = useState('')
@@ -19,8 +19,8 @@ export default function Login() {
   const [enviando, setEnviando] = useState(false)
 
   useEffect(() => {
-    if (!loading && usuario) navigate('/', { replace: true })
-  }, [usuario, loading, navigate])
+    if (!loading && session) navigate('/', { replace: true })
+  }, [session, loading, navigate])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -48,7 +48,7 @@ export default function Login() {
 
         {!backendConfigurado && (
           <div className="mb-4">
-            <ErrorBox mensaje="Falta configurar VITE_GAS_URL (la URL de la Web App de Apps Script) en el archivo .env" />
+            <ErrorBox mensaje="Falta configurar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en el archivo .env" />
           </div>
         )}
 

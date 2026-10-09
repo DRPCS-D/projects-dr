@@ -1,3 +1,4 @@
+import type { Session } from '@supabase/supabase-js'
 import {
   createContext,
   useCallback,
@@ -8,180 +9,178 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { ErrorApi, gas, guardarToken, leerToken, mensajeDe, onSesionExpirada } from '@/lib/api'
-import { claveLocal } from '@/lib/app'
+import { miPerfil } from '@/lib/datos'
+import { esSinConexion, mensajeDe } from '@/lib/errores'
 import { resetearRecursos } from '@/lib/recurso'
+import { supabase } from '@/lib/supabase'
 import type { Usuario } from '@/lib/tipos'
 
 interface AuthState {
-  /** La persona con sesion, o null. Hay un solo nivel de usuario: no hay roles. */
+  session: Session | null
+  /** Mi fila de `usuarios` (nombre, rol...). Null si no hay sesion o no se pudo cargar. */
   usuario: Usuario | null
+  /** Roles: 'admin' gestiona usuarios. No da acceso a proyectos ajenos. */
+  esAdmin: boolean
   loading: boolean
   /**
-   * No se pudo hablar con el servidor Y no hay un perfil guardado para
-   * mostrar. Es distinto de "sin sesion": el token sigue guardado, asi que
-   * hay que ofrecer reintentar, no mandar al login.
+   * Hay sesion valida pero algo impide usar la app:
+   * - 'sin-perfil': existe la cuenta de Auth pero nadie la dio de alta en
+   *   `usuarios` (por ejemplo, se creo a mano en el panel de Supabase).
+   * - 'inactivo': el usuario esta desactivado.
+   * Sin esto, la pantalla queda en blanco en vez de explicar por que.
+   */
+  problemaPerfil: 'sin-perfil' | 'inactivo' | null
+  /**
+   * No se pudo hablar con el servidor al cargar el perfil. Es distinto de "sin
+   * sesion": la sesion sigue guardada, asi que se ofrece reintentar y no se
+   * manda al login.
    */
   errorConexion: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
-  /** Vuelve a pedir el perfil (despues de editar el propio nombre, por ejemplo). */
   refrescarPerfil: () => Promise<void>
   reintentar: () => void
 }
 
 const AuthContext = createContext<AuthState | null>(null)
 
-// El perfil (nombre, email, color) se guarda junto al token: asi la app abre
-// al instante con lo ultimo conocido y valida la sesion por detras. Apps
-// Script puede tardar de 1 a 30 s en contestar; sin esto, cada F5 mostraria
-// "Cargando…" todo ese tiempo, y un fallo de red momentaneo parecia un logout.
-const CLAVE_PERFIL = claveLocal('perfil')
-
-function leerPerfilGuardado(): Usuario | null {
-  try {
-    const crudo = localStorage.getItem(CLAVE_PERFIL)
-    return crudo && leerToken() ? (JSON.parse(crudo) as Usuario) : null
-  } catch {
-    return null
-  }
-}
-
-function guardarPerfil(u: Usuario | null): void {
-  try {
-    if (u) localStorage.setItem(CLAVE_PERFIL, JSON.stringify(u))
-    else localStorage.removeItem(CLAVE_PERFIL)
-  } catch {
-    // Sin localStorage la app igual funciona, solo que espera al servidor al abrir.
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [usuario, setUsuario] = useState<Usuario | null>(leerPerfilGuardado)
-  // Con perfil guardado no hay nada que esperar: se muestra ya y se revalida.
-  const [loading, setLoading] = useState(() => leerPerfilGuardado() === null)
+  const [session, setSession] = useState<Session | null>(null)
+  const [usuario, setUsuario] = useState<Usuario | null>(null)
+  const [problemaPerfil, setProblemaPerfil] = useState<AuthState['problemaPerfil']>(null)
   const [errorConexion, setErrorConexion] = useState(false)
+  const [loading, setLoading] = useState(true)
 
-  // Evita que una carga de perfil vieja pise a una nueva: si mientras se
-  // valida el token guardado la persona inicia sesion (u otra pestana la
-  // cierra), el resultado de la carga anterior ya no vale y se descarta.
-  // Ver CLAUDE.md → "La carrera de auth/perfil al montar".
+  // Evita que una carga de perfil vieja pise a una nueva al cambiar de sesion
   const cargaActual = useRef(0)
 
-  const cargarPerfil = useCallback(async (): Promise<boolean> => {
+  /**
+   * Devuelve si esta carga seguia siendo la vigente al terminar (su token no
+   * fue superado por otra mas nueva). Al montar la app se disparan dos cargas
+   * casi simultaneas para el mismo usuario -- el INITIAL_SESSION que emite
+   * onAuthStateChange al suscribirse, y el getSession() inicial -- y sin este
+   * valor la perdedora apagaba el loading con el perfil todavia en null: el
+   * layout veia loading=false + usuario=null y redirigia al login por creer
+   * que no habia sesion, justo antes de que la ganadora escribiera los datos.
+   * Pasaba siempre entrando por URL directa o F5, nunca navegando con links.
+   */
+  const cargarPerfil = useCallback(async (userId: string | undefined): Promise<boolean> => {
     const token = ++cargaActual.current
-    if (!leerToken()) {
+
+    if (!userId) {
       setUsuario(null)
-      guardarPerfil(null)
+      setProblemaPerfil(null)
       setErrorConexion(false)
       return true
     }
+
     try {
-      const u = await gas<Usuario>('auth.yo')
+      const perfil = await miPerfil(userId)
       if (token !== cargaActual.current) return false
-      guardarPerfil(u)
-      setUsuario(u)
       setErrorConexion(false)
+      setUsuario(perfil)
+      setProblemaPerfil(!perfil ? 'sin-perfil' : !perfil.activo ? 'inactivo' : null)
     } catch (e) {
       if (token !== cargaActual.current) return false
-      if (e instanceof ErrorApi && e.codigo === 401) {
-        // Sesion vencida o cuenta desactivada: gas() ya borro el token.
-        guardarPerfil(null)
-        setUsuario(null)
-        setErrorConexion(false)
-      } else if (leerPerfilGuardado()) {
-        // Fallo de red / servidor lento: la sesion NO se pierde. Se sigue con
-        // lo guardado; la siguiente accion reintenta.
-        setErrorConexion(false)
-      } else {
-        setErrorConexion(true)
-      }
+      setUsuario(null)
+      setProblemaPerfil(null)
+      // Sin red no es "cuenta sin configurar": no hay que decirle eso a nadie.
+      setErrorConexion(esSinConexion(e))
+      if (!esSinConexion(e)) setProblemaPerfil('sin-perfil')
     }
     return true
   }, [])
 
   useEffect(() => {
     let vivo = true
-    cargarPerfil().then((vigente) => {
+    // Compara el usuario, no el nombre del evento: supabase-js revalida la
+    // sesion cada vez que la pestana recupera el foco, y segun la version eso
+    // puede disparar 'SIGNED_IN' (no solo 'TOKEN_REFRESHED') aunque sea el
+    // mismo usuario de siempre. Si a eso se le hace setLoading(true), el
+    // AppLayout desmonta el Outlet y se pierde cualquier formulario a medio
+    // llenar. Reaccionar solo a un cambio real de usuario evita el problema
+    // sin depender de que lista de eventos haya que ignorar.
+    const usuarioIdAnterior = { current: undefined as string | undefined }
+
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!vivo) return
+      usuarioIdAnterior.current = data.session?.user?.id
+      setSession(data.session)
+      const vigente = await cargarPerfil(data.session?.user?.id)
       if (vivo && vigente) setLoading(false)
     })
 
-    // El backend dijo 401 (sesion vencida, cuenta desactivada, clave
-    // reseteada): se vuelve al login en vez de dejar pantallas que fallan una
-    // a una con "No autenticado".
-    onSesionExpirada(() => {
-      cargaActual.current++
-      resetearRecursos()
-      guardarPerfil(null)
-      setUsuario(null)
-    })
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_evento, nuevaSesion) => {
+      if (!vivo) return
+      setSession(nuevaSesion)
 
-    // Cerrar sesion (o entrar) en una pestana se refleja en las demas.
-    const claveSesion = claveLocal('sesion')
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== claveSesion) return
+      const idNuevo = nuevaSesion?.user?.id
+      if (idNuevo === usuarioIdAnterior.current) return
+      usuarioIdAnterior.current = idNuevo
+
+      // Otra persona (o ninguna) en el mismo dispositivo: lo cacheado en
+      // memoria era de la anterior y no tiene que verse ni un instante.
       resetearRecursos()
-      setUsuario(leerPerfilGuardado())
-      cargarPerfil().then((vigente) => {
-        if (vivo && vigente) setLoading(false)
-      })
-    }
-    window.addEventListener('storage', onStorage)
+      setLoading(true)
+      const vigente = await cargarPerfil(idNuevo)
+      if (vivo && vigente) setLoading(false)
+    })
 
     return () => {
       vivo = false
-      onSesionExpirada(null)
-      window.removeEventListener('storage', onStorage)
+      subscription.unsubscribe()
     }
   }, [cargarPerfil])
 
   const signIn = useCallback(async (email: string, password: string) => {
-    try {
-      const r = await gas<{ token: string; usuario: Usuario }>('auth.login', {
-        email: email.trim(),
-        password,
-      })
-      cargaActual.current++
-      // Otra persona pudo haber usado este dispositivo: lo cacheado era suyo.
-      resetearRecursos()
-      guardarToken(r.token)
-      guardarPerfil(r.usuario)
-      setUsuario(r.usuario)
-      setErrorConexion(false)
-      return { error: null }
-    } catch (e) {
-      return { error: mensajeDe(e, 'No se pudo iniciar sesión. Intentalo de nuevo.') }
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+    // No se expone el mensaje crudo de Supabase: filtra si el email existe o no
+    if (error) {
+      if (/invalid login|credentials/i.test(error.message)) return { error: 'Email o contraseña incorrectos.' }
+      if (/banned/i.test(error.message)) return { error: 'Tu usuario fue desactivado. Contactá a un administrador.' }
+      return { error: mensajeDe(error, 'No se pudo iniciar sesión. Intentalo de nuevo.') }
     }
+    return { error: null }
   }, [])
 
   const signOut = useCallback(async () => {
-    // Primero se cierra de este lado: no hay que esperar a Apps Script para
-    // salir, y si el servidor no contesta igual queda cerrada aca.
-    const avisar = gas('auth.logout').catch(() => {})
-    cargaActual.current++
-    guardarToken(null)
-    guardarPerfil(null)
+    await supabase.auth.signOut()
     resetearRecursos()
     setUsuario(null)
+    setProblemaPerfil(null)
     setErrorConexion(false)
-    void avisar
   }, [])
 
   const refrescarPerfil = useCallback(async () => {
-    await cargarPerfil()
+    const { data } = await supabase.auth.getSession()
+    await cargarPerfil(data.session?.user?.id)
   }, [cargarPerfil])
 
   const reintentar = useCallback(() => {
     setErrorConexion(false)
     setLoading(true)
-    cargarPerfil().then((vigente) => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      const vigente = await cargarPerfil(data.session?.user?.id)
       if (vigente) setLoading(false)
     })
   }, [cargarPerfil])
 
   const valor = useMemo<AuthState>(
-    () => ({ usuario, loading, errorConexion, signIn, signOut, refrescarPerfil, reintentar }),
-    [usuario, loading, errorConexion, signIn, signOut, refrescarPerfil, reintentar],
+    () => ({
+      session,
+      usuario,
+      esAdmin: usuario?.rol === 'admin' && usuario.activo,
+      loading,
+      problemaPerfil,
+      errorConexion,
+      signIn,
+      signOut,
+      refrescarPerfil,
+      reintentar,
+    }),
+    [session, usuario, loading, problemaPerfil, errorConexion, signIn, signOut, refrescarPerfil, reintentar],
   )
 
   return <AuthContext.Provider value={valor}>{children}</AuthContext.Provider>

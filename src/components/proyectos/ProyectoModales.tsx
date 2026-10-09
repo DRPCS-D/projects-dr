@@ -8,7 +8,8 @@ import { Field, Input, Textarea } from '@/components/ui/field'
 import { Modal } from '@/components/ui/modal'
 import { useAuth } from '@/hooks/useAuth'
 import { useUsuarios } from '@/hooks/useUsuarios'
-import { gas, mensajeDe } from '@/lib/api'
+import { editarProyecto, guardarMiembros } from '@/lib/datos'
+import { mensajeDe } from '@/lib/errores'
 import { normalizar } from '@/lib/format'
 import { COLORES, type Proyecto } from '@/lib/tipos'
 import { cn } from '@/lib/utils'
@@ -111,7 +112,7 @@ export function ProyectoFormModal({
     setError(null)
     try {
       if (proyecto) {
-        const p = await gas<Proyecto>('proyectos.editar', { id: proyecto.id, nombre, descripcion, color })
+        const p = await editarProyecto(proyecto.id, { nombre, descripcion, color })
         onGuardado?.(p)
         toast.success('Proyecto actualizado')
       } else {
@@ -196,7 +197,7 @@ export function MiembrosModal({
     setGuardando(true)
     setError(null)
     try {
-      const ids = await gas<string[]>('proyectos.miembros', { id: proyecto.id, usuarios: seleccion })
+      const ids = await guardarMiembros(proyecto.id, seleccion)
       onGuardado(ids)
       toast.success('Equipo actualizado')
       onCerrar()

@@ -18,7 +18,8 @@ import { useEstadoSesion } from '@/hooks/useEstadoSesion'
 import { useProyecto } from '@/hooks/useProyecto'
 import { actualizarEnLista, quitarDeLista } from '@/hooks/useProyectos'
 import { useUsuariosPorId } from '@/hooks/useUsuarios'
-import { gas, mensajeDe } from '@/lib/api'
+import { archivarProyecto, eliminarProyecto, salirProyecto } from '@/lib/datos'
+import { mensajeDe } from '@/lib/errores'
 import { claveLocal } from '@/lib/app'
 import { descargarCSV } from '@/lib/exportar'
 import { normalizar } from '@/lib/format'
@@ -139,9 +140,9 @@ export default function Proyecto() {
 
   async function archivar() {
     try {
-      const r = await gas<TProyecto>('proyectos.archivar', { id: p.id, archivado: !archivado })
-      reflejar({ estado: r.estado })
-      toast.success(r.estado === 'archivado' ? 'Proyecto archivado' : 'Proyecto reactivado')
+      const estado = await archivarProyecto(p.id, !archivado)
+      reflejar({ estado })
+      toast.success(estado === 'archivado' ? 'Proyecto archivado' : 'Proyecto reactivado')
     } catch (e) {
       toast.error(mensajeDe(e))
     }
@@ -149,7 +150,7 @@ export default function Proyecto() {
 
   async function salir() {
     try {
-      await gas('proyectos.salir', { id: p.id })
+      await salirProyecto(p.id)
       quitarDeLista(p.id)
       toast.success('Saliste del proyecto')
       navigate('/proyectos')
@@ -344,7 +345,7 @@ export default function Proyecto() {
         onCancelar={() => setModalEliminar(false)}
         onConfirmar={async () => {
           try {
-            await gas('proyectos.eliminar', { id: p.id })
+            await eliminarProyecto(p.id)
             quitarDeLista(p.id)
             toast.success('Proyecto eliminado')
             navigate('/proyectos')

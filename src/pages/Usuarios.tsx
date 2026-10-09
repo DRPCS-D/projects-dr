@@ -1,5 +1,6 @@
 import { Plus, UserRound } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { CambiarMiPasswordModal } from '@/components/cuenta/CambiarMiPasswordModal'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -17,9 +18,9 @@ import { useEstadoSesion } from '@/hooks/useEstadoSesion'
 import { useUsuarios } from '@/hooks/useUsuarios'
 import { formatFecha, normalizar } from '@/lib/format'
 import { ordenar, type Orden } from '@/lib/orden'
-import type { Usuario } from '@/lib/tipos'
+import { ROL_LABEL, type Usuario } from '@/lib/tipos'
 
-type CampoOrden = 'nombre' | 'email' | 'estado' | 'alta'
+type CampoOrden = 'nombre' | 'email' | 'rol' | 'estado' | 'alta'
 
 function valorOrden(u: Usuario, campo: CampoOrden): unknown {
   switch (campo) {
@@ -27,6 +28,8 @@ function valorOrden(u: Usuario, campo: CampoOrden): unknown {
       return u.nombre
     case 'email':
       return u.email
+    case 'rol':
+      return ROL_LABEL[u.rol]
     case 'estado':
       return u.activo ? 'Activo' : 'Inactivo'
     case 'alta':
@@ -34,9 +37,17 @@ function valorOrden(u: Usuario, campo: CampoOrden): unknown {
   }
 }
 
-/** Todas las cuentas del sistema. Un solo nivel: cualquiera las gestiona. */
+/**
+ * Todas las cuentas del sistema. Solo los admin la ven: un usuario comun ni
+ * tiene el link, y aunque entrara por URL la Edge Function que hace los cambios
+ * le contestaria 403 (la interfaz no es el control de acceso).
+ */
 export default function Usuarios() {
-  const { usuario: yo, refrescarPerfil } = useAuth()
+  const { usuario: yo, esAdmin, loading: cargandoSesion, refrescarPerfil } = useAuth()
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (!cargandoSesion && !esAdmin) navigate('/', { replace: true })
+  }, [cargandoSesion, esAdmin, navigate])
   const { data, loading, error, crear, editar, setActivo, cambiarPassword } = useUsuarios()
   const [vista, setVista] = useEstadoSesion<{ busqueda: string; orden: Orden<CampoOrden> }>('usuarios', {
     busqueda: '',
@@ -56,6 +67,8 @@ export default function Usuarios() {
   const [editando, setEditando] = useState<Usuario | null>(null)
   const [reseteando, setReseteando] = useState<Usuario | null>(null)
   const [cambiandoMia, setCambiandoMia] = useState(false)
+
+  if (!esAdmin) return null
 
   return (
     <div>
@@ -96,6 +109,9 @@ export default function Usuarios() {
                   <Th campo="email" {...th} className="px-4">
                     Email
                   </Th>
+                  <Th campo="rol" {...th} className="px-4">
+                    Rol
+                  </Th>
                   <Th campo="alta" {...th} className="hidden px-4 sm:table-cell">
                     Alta
                   </Th>
@@ -119,6 +135,9 @@ export default function Usuarios() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground">{u.email}</td>
+                    <td className="px-4 py-2.5">
+                      <Badge tono={u.rol === 'admin' ? 'primary' : 'neutral'}>{ROL_LABEL[u.rol]}</Badge>
+                    </td>
                     <td className="hidden px-4 py-2.5 text-muted-foreground sm:table-cell">{formatFecha(u.creado_en)}</td>
                     <td className="px-4 py-2.5">
                       <Badge tono={u.activo ? 'success' : 'neutral'}>{u.activo ? 'Activo' : 'Inactivo'}</Badge>
@@ -152,6 +171,7 @@ export default function Usuarios() {
 
       <EditarUsuarioModal
         usuario={editando}
+        esYo={editando?.id === yo?.id}
         onCerrar={() => setEditando(null)}
         editar={editar}
         onGuardado={(u) => {
