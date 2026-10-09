@@ -1,4 +1,7 @@
-# Proyectos DR
+# InitialD
+
+> Nombre visible de la app (`app.config.json`). Internamente el proyecto se sigue
+> llamando `projects-dr` (paquete, repo, proyecto de Supabase, URLs): no se cambió a propósito.
 
 Gestión de proyectos al estilo **Basecamp** (cada proyecto con su equipo y sus
 herramientas adentro), con funciones de **Asana / Trello**: tablero Kanban con

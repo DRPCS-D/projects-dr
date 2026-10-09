@@ -4,6 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Que es esto
 
+El nombre VISIBLE de la app es **InitialD** (`app.config.json`). Todo lo interno sigue
+como `projects-dr` a pedido del dueño: `name` de package.json (ojo: es el prefijo de
+las claves de localStorage y del cache del service worker, cambiarlo cierra las
+sesiones), repo, proyecto de Supabase y URLs. No renombrarlo.
+
 App de gestion de proyectos estilo Basecamp + Asana/Trello. Frontend sacado de
 `E:\claude\app-base` (misma estructura, componentes `ui/`, tema, PWA) y backend
 en **Supabase** (Postgres + Auth + una Edge Function). Roles `admin` (gestiona
