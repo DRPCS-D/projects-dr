@@ -2,7 +2,7 @@ import { Check, ChevronRight, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Field, Input, Select, Textarea } from '@/components/ui/field'
+import { Field, Input, Select } from '@/components/ui/field'
 import { ConfirmModal } from '@/components/ui/modal'
 import { esTemporal, type AccionesProyecto } from '@/hooks/useProyecto'
 import { formatFechaHora } from '@/lib/format'
@@ -10,6 +10,7 @@ import { subtareasDe } from '@/lib/tareas'
 import { COLORES, PRIORIDAD_LABEL, type DatosProyecto, type Prioridad, type Tarea, type Usuario } from '@/lib/tipos'
 import { cn } from '@/lib/utils'
 import { AgregarInline, CheckTarea, EtiquetaChip, FechaTarea } from './comun'
+import { DescripcionTarea } from './DescripcionTarea'
 
 /**
  * Detalle de una tarea en un panel lateral (como Asana): se edita campo por
@@ -251,19 +252,15 @@ export function TareaPanel({
           </div>
 
           <Field label="Descripción" className="mt-6">
-            <Textarea
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-              onBlur={() => {
+            <DescripcionTarea
+              key={tarea.id}
+              valor={descripcion}
+              original={tarea.descripcion}
+              onCambiar={setDescripcion}
+              onGuardar={() => {
                 if (descripcion !== tarea.descripcion) editar({ descripcion })
               }}
               disabled={temporal}
-              rows={5}
-              placeholder="Detalles, criterios de terminado, enlaces…"
-              // Sin bordes laterales: solo las líneas de arriba y abajo. Al
-              // enfocar, esas líneas toman el color primario (sin el anillo
-              // que dibujaría de nuevo los costados).
-              className="resize-y rounded-none border-x-0 px-0 shadow-none focus-visible:border-primary focus-visible:ring-0"
             />
           </Field>
 
