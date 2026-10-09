@@ -260,6 +260,10 @@ export function TareaPanel({
               disabled={temporal}
               rows={5}
               placeholder="Detalles, criterios de terminado, enlaces…"
+              // Sin bordes laterales: solo las líneas de arriba y abajo. Al
+              // enfocar, esas líneas toman el color primario (sin el anillo
+              // que dibujaría de nuevo los costados).
+              className="resize-y rounded-none border-x-0 px-0 shadow-none focus-visible:border-primary focus-visible:ring-0"
             />
           </Field>
 
