@@ -73,6 +73,15 @@ npm run build     # tsc + vite build
 
 ### 1. Backend en Apps Script
 
+**Sin instalar nada (copiar y pegar):** en el editor web de Apps Script dejá
+solo `appsscript.json` (con el contenido de `apps-script/appsscript.json`) y
+**un único** archivo `Codigo` con todo el contenido de
+`apps-script-un-archivo/Codigo.js`. Ese archivo se genera con
+`npm run gas:bundle` a partir de `apps-script/`. Después seguí desde "En el
+editor de Apps Script" más abajo.
+
+**Con clasp (recomendado si vas a hacer cambios seguido):**
+
 ```bash
 npm i -g @google/clasp
 clasp login                          # con tu cuenta de Google

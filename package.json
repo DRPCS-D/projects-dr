@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "iconos": "node scripts/generate-icons.mjs",
     "gas:push": "cd apps-script && clasp push",
-    "gas:deploy": "cd apps-script && clasp push && clasp deploy"
+    "gas:deploy": "cd apps-script && clasp push && clasp deploy",
+    "gas:bundle": "node scripts/gas-bundle.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
