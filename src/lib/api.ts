@@ -46,6 +46,52 @@ export function onSesionExpirada(fn: (() => void) | null): void {
   alExpirarSesion = fn
 }
 
+/** Codigo de ErrorApi para "no se pudo hablar con el servidor" (sin respuesta, cortada o ilegible). */
+export const SIN_CONEXION = 0
+
+/**
+ * Acciones que solo leen: si fallan por la red se reintentan solas. Las de
+ * escritura NO, porque si la primera llego a procesarse el reintento
+ * duplicaria la tarea/proyecto; ahi se avisa y el hook recarga lo real.
+ */
+const LECTURAS = new Set(['auth.yo', 'usuarios.listar', 'proyectos.listar', 'proyectos.cargar', 'tareas.mias'])
+const ESPERAS_REINTENTO_MS = [800, 2500]
+const MAX_REINTENTOS_OCUPADO = 2
+/** Apps Script tiene picos de 10-35 s (arranque en frio): mas que esto ya es un fallo. */
+const TIMEOUT_MS = 60_000
+
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+type Respuesta<T> = { ok: boolean; data?: T; error?: string; codigo?: number }
+
+async function pedir<T>(accion: string, datos: unknown): Promise<Respuesta<T>> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS)
+  try {
+    const res = await fetch(URL_BACKEND, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ accion, token: leerToken(), datos: datos ?? {} }),
+      redirect: 'follow',
+      signal: ctl.signal,
+    })
+    // Cuando Google devuelve una pagina de error propia (limite de
+    // peticiones, fallo momentaneo) no trae JSON ni cabeceras CORS: el
+    // navegador lo reporta como "Failed to fetch" y llega al catch de abajo.
+    return await res.json()
+  } catch (e) {
+    const cortada = e instanceof DOMException && e.name === 'AbortError'
+    throw new ErrorApi(
+      cortada
+        ? 'El servidor tardó demasiado en responder. Probá de nuevo.'
+        : 'No se pudo conectar con el servidor. Revisá tu internet y probá de nuevo.',
+      SIN_CONEXION,
+    )
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /**
  * Llama a una accion del backend (`'tareas.crear'`, `'proyectos.cargar'`...).
  *
@@ -53,23 +99,25 @@ export function onSesionExpirada(fn: (() => void) | null): void {
  * haria un preflight OPTIONS que Apps Script no contesta, y fallaria por CORS.
  */
 export async function gas<T>(accion: string, datos?: unknown): Promise<T> {
-  let res: Response
-  try {
-    res = await fetch(URL_BACKEND, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ accion, token: leerToken(), datos: datos ?? {} }),
-      redirect: 'follow',
-    })
-  } catch {
-    throw new ErrorApi('No hay conexión con el servidor. Revisá tu internet.', 0)
-  }
-
-  let json: { ok: boolean; data?: T; error?: string; codigo?: number }
-  try {
-    json = await res.json()
-  } catch {
-    throw new ErrorApi(`Respuesta inválida del servidor (${res.status}).`, res.status)
+  // Fallos de red: solo se reintentan las lecturas (ver LECTURAS).
+  const reintentosRed = LECTURAS.has(accion) ? ESPERAS_REINTENTO_MS : []
+  // 503 = el servidor no consiguio el candado de escritura y NO ejecuto la
+  // accion, asi que reintentar es seguro tambien para las escrituras.
+  let reintentosOcupado = 0
+  let json: Respuesta<T>
+  for (let intentoRed = 0; ; ) {
+    try {
+      json = await pedir<T>(accion, datos)
+    } catch (e) {
+      if (intentoRed >= reintentosRed.length) throw e
+      await dormir(reintentosRed[intentoRed++])
+      continue
+    }
+    if (!json.ok && json.codigo === 503 && reintentosOcupado < MAX_REINTENTOS_OCUPADO) {
+      await dormir(1500 * ++reintentosOcupado)
+      continue
+    }
+    break
   }
 
   if (!json.ok) {

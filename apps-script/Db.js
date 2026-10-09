@@ -435,7 +435,7 @@ function ahora() {
 /** Toda escritura pasa por aca: dos personas guardando a la vez no se pisan filas. */
 function conLock(fn) {
   const lock = LockService.getScriptLock()
-  if (!lock.tryLock(20000)) throw new ErrorApp(503, 'El servidor está ocupado. Intentá de nuevo en unos segundos.')
+  if (!lock.tryLock(15000)) throw new ErrorApp(503, 'El servidor está ocupado. Intentá de nuevo en unos segundos.')
   try {
     return fn()
   } finally {

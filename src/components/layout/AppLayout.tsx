@@ -20,16 +20,35 @@ const NAV = [
 ]
 
 export default function AppLayout() {
-  const { usuario, loading, signOut } = useAuth()
+  const { usuario, loading, errorConexion, signOut, reintentar } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [modalPassword, setModalPassword] = useState(false)
 
   useEffect(() => {
-    if (!loading && !usuario) navigate('/login', { replace: true })
-  }, [usuario, loading, navigate])
+    // Un fallo de conexion no es "sin sesion": no se manda al login.
+    if (!loading && !usuario && !errorConexion) navigate('/login', { replace: true })
+  }, [usuario, loading, errorConexion, navigate])
 
   if (loading) return <Cargando className="min-h-screen" texto="Cargando tu cuenta…" />
+  if (!usuario && errorConexion) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="max-w-md rounded-lg border border-border bg-card p-6 text-center shadow-xs">
+          <h1 className="text-sm font-semibold text-foreground">No se pudo conectar</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            El servidor no respondió. Tu sesión sigue abierta: probá de nuevo en unos segundos.
+          </p>
+          <div className="mt-5 flex justify-center gap-2">
+            <Button onClick={reintentar}>Reintentar</Button>
+            <Button variant="outline" onClick={signOut}>
+              Cerrar sesión
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
   if (!usuario) return null
 
   return (
