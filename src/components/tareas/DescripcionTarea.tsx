@@ -1,5 +1,5 @@
 import { ExternalLink, Link2 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as PointerReact } from 'react'
 import { Textarea } from '@/components/ui/field'
 import { extraerEnlaces, partirEnlaces } from '@/lib/enlaces'
 import { cn } from '@/lib/utils'
@@ -10,6 +10,24 @@ const MAX_TARJETAS = 3
 
 /** Caja sin bordes laterales: solo las lineas de arriba y abajo (ver TareaPanel). */
 const CAJA = 'rounded-none border-x-0 px-0 shadow-none focus-visible:border-primary focus-visible:ring-0'
+
+/**
+ * Posicion, en caracteres, de un punto del DOM dentro del texto de `raiz`. El
+ * texto que se ve es EXACTAMENTE el que se guardo (los enlaces solo cambian como
+ * se dibuja), asi que esa posicion vale tal cual en la caja de edicion. Un punto
+ * fuera de `raiz` se lleva al extremo mas cercano (arrastres que se pasan del borde).
+ */
+function posicionEnTexto(raiz: HTMLElement, nodo: Node, desplazamiento: number): number {
+  const caja = document.createRange()
+  caja.selectNodeContents(raiz)
+  const lado = caja.comparePoint(nodo, desplazamiento)
+  if (lado < 0) return 0
+  if (lado > 0) return raiz.textContent?.length ?? 0
+  const hasta = document.createRange()
+  hasta.selectNodeContents(raiz)
+  hasta.setEnd(nodo, desplazamiento)
+  return hasta.toString().length
+}
 
 /**
  * Descripcion de una tarea, estilo WhatsApp: mientras se escribe es una caja de
@@ -38,25 +56,66 @@ export function DescripcionTarea({
   const [editando, setEditando] = useState(false)
   const cancelado = useRef(false)
   const areaRef = useRef<HTMLTextAreaElement>(null)
+  /** Que quedo seleccionado en la vista al activar la edicion (null: cursor al final). */
+  const seleccionInicial = useRef<{ ini: number; fin: number } | null>(null)
+  const soltar = useRef<AbortController | null>(null)
   const partes = useMemo(() => partirEnlaces(valor), [valor])
   const enlaces = useMemo(() => extraerEnlaces(valor), [valor])
 
-  // Al empezar a editar: foco y cursor al FINAL del texto (por defecto el
-  // navegador lo deja al principio, y para agregar algo habria que ir hasta ahi).
+  // Al empezar a editar: foco, y la misma seleccion que habia en la vista (un
+  // clic deja el cursor donde se hizo clic; arrastrar deja ese texto
+  // seleccionado). Sin seleccion previa, el cursor va al FINAL: por defecto el
+  // navegador lo deja al principio, y para agregar algo habria que ir hasta ahi.
   useEffect(() => {
     const area = areaRef.current
     if (!editando || !area) return
+    const largo = area.value.length
+    const sel = seleccionInicial.current
+    seleccionInicial.current = null
     area.focus()
-    area.setSelectionRange(area.value.length, area.value.length)
+    area.setSelectionRange(Math.min(sel?.ini ?? largo, largo), Math.min(sel?.fin ?? largo, largo))
   }, [editando])
 
-  function empezar() {
+  // Si se desmonta con un clic a medias, no queda un escuchador colgado.
+  useEffect(() => () => soltar.current?.abort(), [])
+
+  function empezar(seleccion?: { ini: number; fin: number }) {
     if (disabled) return
-    // Seleccionar texto para copiarlo no debe abrir la edicion.
-    if (window.getSelection()?.toString()) return
     // Una cancelacion anterior no puede afectar a esta edicion.
     cancelado.current = false
+    seleccionInicial.current = seleccion ?? null
     setEditando(true)
+  }
+
+  /**
+   * Un clic o un arrastre sobre el texto activa la edicion al SOLTAR el boton,
+   * cuando la seleccion ya esta definida. Se escucha en `document` porque un
+   * arrastre puede terminar fuera de la caja (pasarse del ultimo renglon).
+   */
+  function alPresionar(e: PointerReact<HTMLDivElement>) {
+    if (disabled || e.button !== 0) return
+    const caja = e.currentTarget
+    const empezoEnEnlace = !!(e.target as Element).closest('a')
+    soltar.current?.abort()
+    const ctl = new AbortController()
+    soltar.current = ctl
+    document.addEventListener('pointercancel', () => ctl.abort(), { signal: ctl.signal })
+    document.addEventListener(
+      'pointerup',
+      () => {
+        ctl.abort()
+        const sel = window.getSelection()
+        if (!sel || sel.rangeCount === 0) return empezar()
+        const r = sel.getRangeAt(0)
+        // Un clic simple sobre un enlace lo abre: no se edita.
+        if (r.collapsed && empezoEnEnlace) return
+        empezar({
+          ini: posicionEnTexto(caja, r.startContainer, r.startOffset),
+          fin: posicionEnTexto(caja, r.endContainer, r.endOffset),
+        })
+      },
+      { signal: ctl.signal },
+    )
   }
 
   function alSalir() {
@@ -96,7 +155,7 @@ export function DescripcionTarea({
       <div
         tabIndex={disabled ? -1 : 0}
         aria-label="Descripción: clic para editar"
-        onClick={empezar}
+        onPointerDown={alPresionar}
         onKeyDown={(e) => {
           if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
             e.preventDefault()
