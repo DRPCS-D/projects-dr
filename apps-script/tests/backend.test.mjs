@@ -287,3 +287,68 @@ describe('sheet editado a mano', () => {
     expect(gas.hoja('Proyectos')[1].at(-1)).toBe('dato manual')
   })
 })
+
+describe('cache de lecturas', () => {
+  let proyecto, secciones
+
+  beforeEach(() => {
+    proyecto = ok('proyectos.crear', { nombre: 'C', miembros: [beto.id] }, tokenAna)
+    secciones = ok('proyectos.cargar', { id: proyecto.id }, tokenAna).secciones
+  })
+
+  it('una lectura cacheada nunca devuelve algo viejo despues de una escritura desde la app', () => {
+    ok('proyectos.cargar', { id: proyecto.id }, tokenBeto) // queda en cache
+    ok('tareas.crear', { proyecto_id: proyecto.id, seccion_id: secciones[0].id, titulo: 'Nueva' }, tokenAna)
+    expect(ok('proyectos.cargar', { id: proyecto.id }, tokenBeto).tareas.map((t) => t.titulo)).toEqual(['Nueva'])
+  })
+
+  it('lo editado a mano en el Sheet se ve cuando vence el cache', () => {
+    ok('proyectos.cargar', { id: proyecto.id }, tokenAna)
+    const hoja = gas.hoja('Proyectos')
+    hoja[hoja.findIndex((f) => f.includes(proyecto.id))][hoja[0].indexOf('nombre')] = 'Editado a mano'
+    expect(ok('proyectos.cargar', { id: proyecto.id }, tokenAna).proyecto.nombre).toBe('C')
+    gas.vaciarCache()
+    // Vaciar el cache tambien cierra el atajo de la sesion: se vuelve a leer Sesiones.
+    expect(ok('proyectos.cargar', { id: proyecto.id }, tokenAna).proyecto.nombre).toBe('Editado a mano')
+  })
+
+  it('una escritura usa los numeros de fila reales aunque el cache este desactualizado', () => {
+    const base = { proyecto_id: proyecto.id, seccion_id: secciones[0].id }
+    ok('tareas.crear', { ...base, titulo: 'Primera' }, tokenAna)
+    const segunda = ok('tareas.crear', { ...base, titulo: 'Segunda' }, tokenAna)
+    ok('proyectos.cargar', { id: proyecto.id }, tokenAna) // cache con 'Segunda' en la fila 3
+    // Alguien borra a mano la fila de 'Primera': 'Segunda' sube a la fila 2.
+    const hoja = gas.hoja('Tareas')
+    hoja.splice(hoja.findIndex((f) => f.includes('Primera')), 1)
+    ok('tareas.editar', { id: segunda.id, titulo: 'Segunda editada' }, tokenAna)
+    const titulos = gas.hoja('Tareas').slice(1).map((f) => f[hoja[0].indexOf('titulo')])
+    expect(titulos).toEqual(['Segunda editada'])
+  })
+
+  it('tablas que no entran en una entrada de cache se parten en trozos', () => {
+    const base = { proyecto_id: proyecto.id, seccion_id: secciones[0].id }
+    const largo = 'x'.repeat(2000)
+    for (let i = 0; i < 60; i++) ok('tareas.crear', { ...base, titulo: `T${i}`, descripcion: largo }, tokenAna)
+    const primera = ok('proyectos.cargar', { id: proyecto.id }, tokenAna).tareas
+    const segunda = ok('proyectos.cargar', { id: proyecto.id }, tokenAna).tareas // desde el cache
+    expect(primera).toHaveLength(60)
+    expect(segunda).toEqual(primera)
+  })
+
+  it('cada respuesta informa cuanto tardo el servidor', () => {
+    expect(llamar('auth.yo', {}, tokenAna).ms).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('sin el servicio avanzado de Sheets', () => {
+  it('cae a SpreadsheetApp y funciona igual', () => {
+    const g = crearGasLocal({}, { silencioso: true, email: 'x@test.local', sinSheetsApi: true })
+    g.setProp('SETUP_PASSWORD', 'clave-x-123')
+    g.setup()
+    const { token } = g.manejar({ accion: 'auth.login', datos: { email: 'x@test.local', password: 'clave-x-123' } }).data
+    const p = g.manejar({ accion: 'proyectos.crear', token, datos: { nombre: 'P' } }).data
+    const { secciones } = g.manejar({ accion: 'proyectos.cargar', token, datos: { id: p.id } }).data
+    g.manejar({ accion: 'tareas.crear', token, datos: { proyecto_id: p.id, seccion_id: secciones[0].id, titulo: 'T' } })
+    expect(g.manejar({ accion: 'proyectos.cargar', token, datos: { id: p.id } }).data.tareas).toHaveLength(1)
+  })
+})

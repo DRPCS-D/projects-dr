@@ -68,7 +68,8 @@ function crearHoja(nombre, filas) {
 
 /**
  * @param {object} [estado] lo que devolvio `exportar()` de una corrida anterior.
- * @param {{ email?: string, fallarLock?: boolean }} [opciones]
+ * @param {{ email?: string, fallarLock?: boolean, silencioso?: boolean, sinSheetsApi?: boolean }} [opciones]
+ *   `sinSheetsApi`: como si el servicio avanzado de Sheets no estuviera habilitado.
  */
 export function crearGasLocal(estado = {}, opciones = {}) {
   const hojas = new Map(Object.entries(estado.hojas ?? {}).map(([n, f]) => [n, crearHoja(n, f)]))
@@ -93,7 +94,32 @@ export function crearGasLocal(estado = {}, opciones = {}) {
     SpreadsheetApp: {
       openById: () => libro,
       create: () => libro,
+      flush: () => {},
     },
+    // Servicio avanzado de Sheets: como la API real, recorta las celdas
+    // vacias del final de cada fila y las filas vacias del final.
+    Sheets: opciones.sinSheetsApi
+      ? undefined
+      : {
+          Spreadsheets: {
+            Values: {
+              batchGet: (_id, { ranges }) => ({
+                valueRanges: ranges.map((r) => {
+                  const nombre = r.replace(/^'|'$/g, '')
+                  const h = hojas.get(nombre)
+                  if (!h) throw new Error(`Unable to parse range: ${r}`)
+                  const filas = h._datos.map((f) => {
+                    const copia = f.map((c) => c ?? '')
+                    while (copia.length && copia[copia.length - 1] === '') copia.pop()
+                    return copia
+                  })
+                  while (filas.length && filas[filas.length - 1].length === 0) filas.pop()
+                  return { range: `${nombre}!A1`, values: filas.length ? filas : undefined }
+                }),
+              }),
+            },
+          },
+        },
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => props.get(k) ?? null,
@@ -109,6 +135,20 @@ export function crearGasLocal(estado = {}, opciones = {}) {
         },
         put: (k, v, seg = 600) => cache.set(k, { valor: String(v), vence: Date.now() + seg * 1000 }),
         remove: (k) => cache.delete(k),
+        getAll: (claves) => {
+          const out = {}
+          for (const k of claves) {
+            const e = cache.get(k)
+            if (e && e.vence >= Date.now()) out[k] = e.valor
+          }
+          return out
+        },
+        putAll: (valores, seg = 600) => {
+          for (const [k, v] of Object.entries(valores)) {
+            if (String(v).length > 100 * 1024) throw new Error('Argumento demasiado grande: value')
+            cache.set(k, { valor: String(v), vence: Date.now() + seg * 1000 })
+          }
+        },
       }),
     },
     LockService: {
@@ -143,6 +183,8 @@ export function crearGasLocal(estado = {}, opciones = {}) {
     setup: () => contexto.setup(),
     setProp: (k, v) => props.set(k, v),
     hoja: (n) => hojas.get(n)?._datos ?? null,
+    /** Vacia el CacheService simulado (como si hubiera vencido todo). */
+    vaciarCache: () => cache.clear(),
     exportar: () => ({
       hojas: Object.fromEntries([...hojas].map(([n, h]) => [n, h._datos])),
       props: Object.fromEntries(props),

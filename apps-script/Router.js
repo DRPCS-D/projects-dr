@@ -54,7 +54,11 @@ function acciones_() {
 
 /** Logica del router, separada de doPost para poder probarla sin HTTP. */
 function manejar(req) {
-  resetearCacheDb()
+  const inicio = Date.now()
+  // `ms` (tiempo del lado del servidor) viaja en cada respuesta: sirve para
+  // ver desde el navegador si lo lento es Apps Script o la red.
+  const conTiempo = (r) => Object.assign(r, { ms: Date.now() - inicio })
+  resetearCacheDb(false)
   try {
     if (!req || typeof req !== 'object') throw new ErrorApp(400, 'Pedido inválido.')
     const tabla = acciones_()
@@ -63,15 +67,17 @@ function manejar(req) {
     const datos = req.datos && typeof req.datos === 'object' ? req.datos : {}
 
     const ejecutar = () => {
+      // Las escrituras leen el Sheet fresco, no el cache (ver Db.js).
+      resetearCacheDb(Boolean(accion.escribe))
       const ctx = { token: req.token, usuario: accion.publica ? null : usuarioDeToken(req.token) }
       return accion.fn(datos, ctx)
     }
     const data = accion.escribe ? conLock(ejecutar) : ejecutar()
-    return { ok: true, data: data === undefined ? null : data }
+    return conTiempo({ ok: true, data: data === undefined ? null : data })
   } catch (err) {
-    if (err instanceof ErrorApp) return { ok: false, error: err.message, codigo: err.codigo }
+    if (err instanceof ErrorApp) return conTiempo({ ok: false, error: err.message, codigo: err.codigo })
     console.error(err && err.stack ? err.stack : err)
-    return { ok: false, error: 'Error interno del servidor.', codigo: 500 }
+    return conTiempo({ ok: false, error: 'Error interno del servidor.', codigo: 500 })
   }
 }
 

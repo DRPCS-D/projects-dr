@@ -33,14 +33,19 @@ function setup() {
     DriveApp.getFileById(ss.getId()).moveTo(carpeta)
   }
 
-  resetearCacheDb()
-  if (leer('Usuarios').length === 0) {
-    const email = normalizarEmail(props.getProperty('SETUP_EMAIL') || Session.getEffectiveUser().getEmail())
-    const password = props.getProperty('SETUP_PASSWORD') || Utilities.getUuid().slice(0, 12)
-    const nombre = props.getProperty('SETUP_NOMBRE') || email.split('@')[0]
-    usuariosCrear({ nombre, email, password })
-    Logger.log('Primer usuario creado: ' + email + ' / contraseña: ' + password + '  (cambiala al entrar)')
-  }
+  // Como cualquier escritura: lee el Sheet fresco, con lock, e invalida el cache.
+  conLock(() => {
+    resetearCacheDb(true)
+    // Las columnas nuevas que haya agregado prepararHojas_ cambian lo cacheado.
+    Object.keys(ESQUEMA).forEach((t) => { _tocadas[t] = true })
+    if (leer('Usuarios').length === 0) {
+      const email = normalizarEmail(props.getProperty('SETUP_EMAIL') || Session.getEffectiveUser().getEmail())
+      const password = props.getProperty('SETUP_PASSWORD') || Utilities.getUuid().slice(0, 12)
+      const nombre = props.getProperty('SETUP_NOMBRE') || email.split('@')[0]
+      usuariosCrear({ nombre, email, password })
+      Logger.log('Primer usuario creado: ' + email + ' / contraseña: ' + password + '  (cambiala al entrar)')
+    }
+  })
 
   Logger.log('Listo. Base: ' + ss.getUrl())
   return ss.getId()
